@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import html
+import json
+import hashlib
+from datetime import datetime, timezone
+from ecoradar_metodo import agregar_agua_diaria
 import io
 import re
 import unicodedata
@@ -1277,31 +1281,16 @@ def gerar_interpretacao_figura(fig: go.Figure) -> list[str]:
 
 
 def exibir_interpretacao_grafico(fig: go.Figure) -> None:
-    if not st.session_state.get("mostrar_interpretacoes_graficos", True):
-        return
-    titulo = _titulo_figura(fig)
-    bullets = gerar_interpretacao_figura(fig)
-    itens = "".join(f"<li>{item}</li>" for item in bullets)
-    st.markdown(
-        f"""
-        <div class="chart-interpretation">
-            <div class="chart-interpretation-head">🧭 Interpretação simples dos resultados</div>
-            <div class="chart-interpretation-subtitle">
-                Leitura automática do que aparece em <strong>{html.escape(titulo)}</strong>.
-            </div>
-            <ul>{itens}</ul>
-            <div class="chart-interpretation-note">
-                Leitura exploratória: associações, correlações e tendências visuais não demonstram causalidade.
-                Os resultados dependem do período, da cobertura e da qualidade das bases utilizadas.
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    if st.session_state.get("mostrar_interpretacoes_graficos", True):
+        st.caption("Leitura exploratória. Verifique a fonte, o período, a unidade, a estação e os pares válidos. "
+                   "Associação, linha de tendência e importância de atributo não demonstram causalidade. "
+                   "Sem teste de significância, um pico isolado não confirma uma relação ambiental.")
+
 
 
 def renderizar_grafico(fig: go.Figure, **kwargs: Any) -> None:
     fig_estilizada = estilizar_figura(fig)
+    fig_estilizada.update_traces(connectgaps=False, selector=dict(type="scatter"))
     st.plotly_chart(fig_estilizada, **kwargs)
     exibir_interpretacao_grafico(fig_estilizada)
 
@@ -1383,7 +1372,7 @@ def exibir_logo_sidebar() -> None:
         return
 
     st.markdown("<div style='padding-top:0.2rem'></div>", unsafe_allow_html=True)
-    st.image(str(caminho_logo), use_container_width=True)
+    st.image(str(caminho_logo), width="stretch")
     st.markdown("<div style='height:0.45rem'></div>", unsafe_allow_html=True)
 
 def normalizar_texto(texto: Any) -> str:
@@ -1439,65 +1428,18 @@ def formatar_card_valor(valor: Any, casas: int = 1, unidade: str = "", vazio: st
 
 
 
-def calcular_acuracia_percentual(y_real: Any, y_previsto: Any) -> float:
-    """Calcula uma acurácia percentual intuitiva para regressão usando 100 - MAPE."""
-    reais = np.asarray(y_real, dtype=float)
-    previstos = np.asarray(y_previsto, dtype=float)
-    mascara = np.isfinite(reais) & np.isfinite(previstos) & (np.abs(reais) > 1e-9)
-    if not mascara.any():
-        return np.nan
-    mape = np.mean(np.abs((reais[mascara] - previstos[mascara]) / reais[mascara]))
-    return float(np.clip((1.0 - mape) * 100.0, 0.0, 100.0))
 
 
 def exibir_cards_metricas_modelo(metricas: dict[str, float], unidade_mae: str = "") -> None:
-    """Exibe Acurácia, MAE e R² como cartões visuais de avaliação do modelo."""
     if not metricas:
-        st.info("As métricas de validação ainda não estão disponíveis para este recorte de dados.")
+        st.info("Métricas indisponíveis para este recorte.")
         return
+    a, b = st.columns(2)
+    a.metric("MAE no teste", formatar_decimal_br(metricas.get("MAE", np.nan), 2, unidade_mae))
+    b.metric("R² no teste", formatar_decimal_br(metricas.get("R2", np.nan), 3))
+    st.caption("MAE é erro absoluto médio na unidade do alvo. R² pode ser negativo; não é percentual de acurácia. "
+               "Uma simulação contemporânea não é previsão de um dia futuro.")
 
-    acuracia = metricas.get("ACURACIA", np.nan)
-    mae = metricas.get("MAE", np.nan)
-    r2 = metricas.get("R2", np.nan)
-
-    valor_acuracia = formatar_decimal_br(acuracia, 1, "%") if pd.notna(acuracia) else "—"
-    valor_mae = formatar_decimal_br(mae, 2, unidade_mae) if pd.notna(mae) else "—"
-    valor_r2 = formatar_decimal_br(r2, 3) if pd.notna(r2) else "—"
-
-    st.markdown(
-        f"""
-        <div class="model-metrics-grid">
-            <div class="model-metric-card metric-accuracy">
-                <div class="model-metric-head">
-                    <div class="model-metric-icon">🎯</div>
-                    <div class="model-metric-title">Acurácia estimada</div>
-                </div>
-                <div class="model-metric-value">{valor_acuracia}</div>
-                <div class="model-metric-caption">Percentual de proximidade entre os valores previstos e observados.</div>
-                <div class="model-metric-formula">Cálculo visual: 100 − MAPE</div>
-            </div>
-            <div class="model-metric-card metric-mae">
-                <div class="model-metric-head">
-                    <div class="model-metric-icon">📉</div>
-                    <div class="model-metric-title">MAE · Erro médio</div>
-                </div>
-                <div class="model-metric-value">{valor_mae}</div>
-                <div class="model-metric-caption">Indica o erro médio absoluto das previsões. Quanto menor, melhor o desempenho.</div>
-                <div class="model-metric-formula">Erro médio das previsões</div>
-            </div>
-            <div class="model-metric-card metric-r2">
-                <div class="model-metric-head">
-                    <div class="model-metric-icon">📊</div>
-                    <div class="model-metric-title">R² · Explicação</div>
-                </div>
-                <div class="model-metric-value">{valor_r2}</div>
-                <div class="model-metric-caption">Indica quanto da variação observada nos dados é explicada pelo modelo.</div>
-                <div class="model-metric-formula">Mais próximo de 1 = melhor ajuste</div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 def resumir_nome_area(nome_area: str) -> str:
@@ -1698,12 +1640,33 @@ def get_session() -> requests.Session:
     return session
 
 def fetch_json(url: str, timeout: int = REQUEST_TIMEOUT) -> Optional[dict[str, Any]]:
-    try:
-        response = get_session().get(url, timeout=timeout)
-        response.raise_for_status()
-        return response.json()
-    except Exception:
-        return None
+    cache = BASE_DIR / "cache_api"
+    cache.mkdir(exist_ok=True)
+    chave = hashlib.sha256(url.encode()).hexdigest()
+    destino = cache / f"{chave}.json"
+    meta_destino = cache / f"{chave}.meta.json"
+    ultimo_erro = ""
+    for tentativa in range(3):
+        try:
+            response = get_session().get(url, timeout=timeout)
+            response.raise_for_status()
+            dados = response.json()
+            if isinstance(dados, dict) and dados.get("error"):
+                raise ValueError(str(dados.get("reason", "Erro na API")))
+            bruto = response.content
+            tmp = destino.with_suffix(".tmp")
+            tmp.write_bytes(bruto)
+            tmp.replace(destino)
+            meta_destino.write_text(json.dumps({"url": url, "consultado_em_utc": datetime.now(timezone.utc).isoformat(),
+                                                "status_http": response.status_code, "sha256": hashlib.sha256(bruto).hexdigest()},
+                                               ensure_ascii=False, indent=2), encoding="utf-8")
+            return dados
+        except Exception as exc:
+            ultimo_erro = str(exc)
+    # Não troca uma falha por zeros nem substitui por outra localidade/período.
+    st.warning(f"Fonte indisponível após 3 tentativas: {url.split('?')[0]}. {ultimo_erro[:150]}")
+    return None
+
 
 @st.cache_data(ttl=86400)
 def carregar_cetesb_balneabilidade_auto() -> pd.DataFrame:
@@ -1778,16 +1741,23 @@ def listar_arquivos_data() -> list[str]:
     return sorted([p.name for p in DATA_DIR.iterdir() if p.is_file()])
 
 def carregar_fonte_local(nome_fonte: str) -> tuple[pd.DataFrame, str]:
-    for nome_arquivo in MANUAL_SOURCE_CONFIG.get(nome_fonte, []):
+    nomes = set(MANUAL_SOURCE_CONFIG.get(nome_fonte, []))
+    if nome_fonte == "SIMQUA":
+        nomes.update(p.name for p in DATA_DIR.glob("simqua_*.csv"))
+    bases, arquivos = [], []
+    for nome_arquivo in sorted(nomes):
         caminho = DATA_DIR / nome_arquivo
-        if caminho.exists():
-            try:
-                df = ler_bytes_tabulares(caminho.read_bytes(), caminho.name)
-                if not df.empty:
-                    return df, f"arquivo local: {caminho.name}"
-            except Exception:
-                continue
-    return pd.DataFrame(), "sem arquivo local"
+        if not caminho.is_file():
+            continue
+        df = ler_bytes_tabulares(caminho.read_bytes(), caminho.name)
+        if df.empty:
+            st.warning(f"Arquivo sem tabela válida: {caminho.name}")
+            continue
+        df["arquivo_origem"] = caminho.name
+        bases.append(df)
+        arquivos.append(caminho.name)
+    return (pd.concat(bases, ignore_index=True), "arquivos locais: " + ", ".join(arquivos)) if bases else (pd.DataFrame(), "sem arquivo local")
+
 
 def carregar_fonte_hibrida(nome_fonte: str, uploaded_file=None) -> tuple[pd.DataFrame, str]:
     if nome_fonte == "CETESB_BALNEABILIDADE":
@@ -2078,10 +2048,10 @@ def exibir_guia_local() -> None:
     with st.expander("Como alimentar as fontes complementares", expanded=False):
         st.markdown("O app segue esta ordem: **API/endpoint oficial → arquivo local em `data/` → upload manual**.")
         exemplos = [{"Fonte": fonte, "Exemplos de arquivo local": ", ".join(nomes[:3])} for fonte, nomes in MANUAL_SOURCE_CONFIG.items()]
-        st.dataframe(pd.DataFrame(exemplos), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(exemplos), width="stretch", hide_index=True)
         arquivos = listar_arquivos_data()
         if arquivos:
-            st.dataframe(pd.DataFrame({"Arquivo": arquivos}), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame({"Arquivo": arquivos}), width="stretch", hide_index=True)
         else:
             st.warning(f"Nenhum arquivo encontrado na pasta `data/`. Caminho procurado: {DATA_DIR}")
 
@@ -2145,7 +2115,7 @@ def exibir_mapa_municipios(df_atual: pd.DataFrame, area: str) -> None:
         center={"lat": df_atual["Latitude"].mean(), "lon": df_atual["Longitude"].mean()},
         title=f"Mapa dos municípios monitorados — {area}",
     )
-    renderizar_grafico(fig, use_container_width=True, key=f"mapa_municipios_{normalizar_texto(area)}")
+    renderizar_grafico(fig, width="stretch", key=f"mapa_municipios_{normalizar_texto(area)}")
 
 def _inferir_cidade_costeira(valor: Any) -> str:
     texto = normalizar_texto(valor)
@@ -2277,7 +2247,7 @@ def exibir_mapa_costeiro_cetesb(df: pd.DataFrame, cidades: list[str], area: str)
         center={"lat": base["latitude_mapa"].mean(), "lon": base["longitude_mapa"].mean()},
         title=f"Mapa de qualidade da água costeira — {area}",
     )
-    renderizar_grafico(fig, use_container_width=True, key=f"mapa_costeiro_{normalizar_texto(area)}")
+    renderizar_grafico(fig, width="stretch", key=f"mapa_costeiro_{normalizar_texto(area)}")
     if (base["Origem coordenada"] == "Município (fallback)").any():
         st.caption("Alguns pontos foram posicionados pelo centro do município porque a base da CETESB não trouxe coordenadas válidas em todas as linhas.")
 
@@ -2316,7 +2286,7 @@ def exibir_panorama_regional(df_atual: pd.DataFrame, df_pm25: pd.DataFrame, df_c
         base_bar = base.dropna(subset=["PM2.5", "Cidade"]).sort_values(by="PM2.5", ascending=False)
         if not base_bar.empty:
             fig = px.bar(base_bar, x="PM2.5", y="Cidade", orientation="h", color="PM2.5", text_auto=True, title="PM2.5 atual por município")
-            renderizar_grafico(fig, use_container_width=True)
+            renderizar_grafico(fig, width="stretch")
         else:
             st.info("Sem dados válidos de PM2.5 para o gráfico por município.")
     with col2:
@@ -2332,7 +2302,7 @@ def exibir_panorama_regional(df_atual: pd.DataFrame, df_pm25: pd.DataFrame, df_c
                 hover_data={"População": ":,.0f", "População_plot": False},
                 title="PM2.5 × chuva × população",
             )
-            renderizar_grafico(fig, use_container_width=True)
+            renderizar_grafico(fig, width="stretch")
         else:
             st.info("Sem dados válidos para montar a dispersão entre PM2.5 e chuva.")
     exibir_mapa_municipios(base, area)
@@ -2342,13 +2312,13 @@ def exibir_panorama_regional(df_atual: pd.DataFrame, df_pm25: pd.DataFrame, df_c
         if not df_pm25.empty:
             fig = px.line(df_pm25, x="Data", y="PM2.5 médio", color="Cidade", markers=True, title=f"Histórico real de PM2.5 — {area}")
             fig.add_hline(y=15, line_dash="dash", line_color="green", annotation_text="Referência OMS")
-            renderizar_grafico(fig, use_container_width=True)
+            renderizar_grafico(fig, width="stretch")
         else:
             st.info("Sem histórico real de PM2.5.")
     with c4:
         if not df_clima.empty:
             fig = px.line(df_clima, x="Data", y="Chuva", color="Cidade", markers=True, title=f"Precipitação diária real — {area}")
-            renderizar_grafico(fig, use_container_width=True)
+            renderizar_grafico(fig, width="stretch")
         else:
             st.info("Sem histórico climático real.")
 
@@ -2374,10 +2344,10 @@ def exibir_aba_litoral(df_cetesb: pd.DataFrame, cidades: list[str], area: str) -
     if col_status and col_municipio:
         resumo = df_cetesb.groupby([col_municipio, col_status]).size().reset_index(name="Quantidade")
         fig = px.bar(resumo, x=col_municipio, y="Quantidade", color=col_status, barmode="group", title="Balneabilidade por município")
-        renderizar_grafico(fig, use_container_width=True)
+        renderizar_grafico(fig, width="stretch")
     else:
         cols_show = [c for c in [col_municipio, col_praia, col_status] if c] or df_cetesb.columns.tolist()[:8]
-        st.dataframe(df_cetesb[cols_show].head(100), use_container_width=True, hide_index=True)
+        st.dataframe(df_cetesb[cols_show].head(100), width="stretch", hide_index=True)
     exibir_mapa_costeiro_cetesb(df_cetesb, cidades, area)
 def _mapear_municipio_estudo(valor: Any, cidades: list[str]) -> str:
     texto = str(valor).strip()
@@ -2457,23 +2427,35 @@ def _preparar_base_fonte(
     return agrupada
 
 def preparar_base_simqua(df: pd.DataFrame, cidades: list[str]) -> pd.DataFrame:
-    return _preparar_base_fonte(
-        df,
-        cidades,
-        ["data", "datahora", "data_hora", "datetime", "timestamp"],
-        ["municipio", "município", "cidade", "estacao", "estação", "ponto", "nome"],
-        {
-            "ph": ["ph", "potencial hidrogenionico", "potencial hidrogeniônico"],
-            "turbidez": ["turbidez"],
-            "oxigenio_dissolvido": ["oxigenio_dissolvido", "oxigenio dissolvido", "oxigênio dissolvido", "od"],
-            "precipitacao_agua": ["precipitacao", "precipitação", "chuva"],
-            "nivel": ["nivel", "nível", "cota"],
-            "vazao": ["vazao", "vazão"],
+    if df.empty:
+        return pd.DataFrame()
+    base = df.copy()
+    c_data = detectar_coluna(base, ["data", "datahora", "data_hora", "datetime", "timestamp"])
+    c_estacao = detectar_coluna(base, ["estacao", "estação"])
+    c_municipio = detectar_coluna(base, ["municipio", "município", "cidade"])
+    if not all([c_data, c_estacao, c_municipio]):
+        st.error("SIMQUA exige colunas de data/hora, estação e município; a agregação sem identificação foi bloqueada.")
+        return pd.DataFrame()
+    base["momento"] = converter_serie_data_flexivel(base[c_data])
+    base["estacao"] = base[c_estacao].astype(str)
+    base["municipio"] = base[c_municipio].apply(lambda x: _mapear_municipio_estudo(x, cidades))
+    mapa = {"ph": ["ph"], "turbidez": ["turbidez"],
+            "oxigenio_dissolvido": ["oxigenio_dissolvido", "oxigênio dissolvido", "od"],
             "condutividade": ["condutividade", "condutividade eletrica"],
-            "temperatura_agua": ["temperatura", "temperatura da agua", "temperatura da água"],
-        },
-        default_city_label="Área de estudo",
-    )
+            "temperatura_agua": ["temperatura_agua", "temperatura"],
+            "precipitacao_agua": ["precipitacao_agua", "precipitacao", "chuva"]}
+    for alvo, candidatos in mapa.items():
+        col = detectar_coluna(base, candidatos)
+        if col:
+            base[alvo] = base[col]
+    try:
+        diario = agregar_agua_diaria(base)
+    except ValueError as exc:
+        st.error(f"Falha na validação SIMQUA: {exc}")
+        return pd.DataFrame()
+    diario["municipio_norm"] = diario["municipio"].map(normalizar_texto)
+    return diario
+
 
 def preparar_base_cetesb_ar(df_pm25: pd.DataFrame, cidades: list[str]) -> pd.DataFrame:
     if df_pm25.empty or "Data" not in df_pm25.columns:
@@ -2680,29 +2662,22 @@ def montar_bases_historicas_compativeis_simqua(
     return df_ar, df_clima
 
 
-def montar_base_integrada(
-    df_ar: pd.DataFrame,
-    df_agua: pd.DataFrame,
-    df_clima_openmeteo: pd.DataFrame,
-) -> pd.DataFrame:
+def montar_base_integrada(df_ar: pd.DataFrame, df_agua: pd.DataFrame, df_clima_openmeteo: pd.DataFrame) -> pd.DataFrame:
     if df_ar.empty or df_agua.empty:
         return pd.DataFrame()
-    base = df_ar.merge(df_agua, on=["municipio", "municipio_norm", "data"], how="inner")
-    if base.empty:
-        ar_area = df_ar.groupby("data", as_index=False).mean(numeric_only=True)
-        agua_area = df_agua.groupby("data", as_index=False).mean(numeric_only=True)
-        base = ar_area.merge(agua_area, on="data", how="inner")
-        if base.empty:
-            return pd.DataFrame()
-        base["municipio"] = "Área integrada"
-        base["municipio_norm"] = "area integrada"
-
-    if not df_clima_openmeteo.empty:
-        if {"municipio", "municipio_norm"}.issubset(df_clima_openmeteo.columns):
-            base = base.merge(df_clima_openmeteo, on=["municipio", "municipio_norm", "data"], how="left")
-        else:
-            base = base.merge(df_clima_openmeteo.groupby("data", as_index=False).mean(numeric_only=True), on="data", how="left")
+    chaves = ["municipio", "municipio_norm", "data"]
+    try:
+        base = df_agua.merge(df_ar, on=chaves, how="inner", validate="many_to_one")
+        if not df_clima_openmeteo.empty:
+            if not set(chaves).issubset(df_clima_openmeteo.columns):
+                st.error("Meteorologia sem identificação municipal; integração bloqueada.")
+                return pd.DataFrame()
+            base = base.merge(df_clima_openmeteo, on=chaves, how="left", validate="many_to_one")
+    except (ValueError, KeyError) as exc:
+        st.error(f"Chaves incompatíveis na integração: {exc}")
+        return pd.DataFrame()
     return base.sort_values(["municipio", "data"]).copy()
+
 
 def _adicionar_linha_tendencia(fig: go.Figure, x: pd.Series, y: pd.Series, nome: str = "Tendência") -> go.Figure:
     x_num = pd.to_numeric(x, errors="coerce")
@@ -2860,6 +2835,9 @@ def rodar_modelagem_turbidez(base: pd.DataFrame) -> Optional[dict[str, Any]]:
                 metricas["MAE"] = float(mean_absolute_error(y.loc[idx_teste], y_pred))
             if r2_score is not None and len(idx_teste) >= 2:
                 metricas["R2"] = float(r2_score(y.loc[idx_teste], y_pred))
+            referencia = np.full(len(idx_teste), y.loc[idx_treino].mean())
+            metricas["MAE_REFERENCIA"] = float(mean_absolute_error(y.loc[idx_teste], referencia))
+            metricas["R2_REFERENCIA"] = float(r2_score(y.loc[idx_teste], referencia))
             metricas["N_TREINO"] = float(len(idx_treino))
             metricas["N_TESTE"] = float(len(idx_teste))
 
@@ -2929,8 +2907,25 @@ def exibir_aba_integracao(
         st.warning("As bases foram carregadas, mas não houve cruzamento suficiente por data e município.")
         return
 
+    if "estacao" not in base.columns:
+        st.error("Identificação da estação ausente; gráficos de associação bloqueados.")
+        return
+    estacao = st.selectbox("Estação hídrica dos gráficos", sorted(base["estacao"].unique()), key=f"ponto_{normalizar_texto(area)}")
+    base = base[base["estacao"] == estacao].copy()
+    intervalo = st.date_input("Período dos gráficos integrados", (base.data.min().date(), base.data.max().date()),
+                             key=f"periodo_integracao_{normalizar_texto(area)}")
+    if len(intervalo) != 2:
+        st.info("Selecione o início e o fim do período.")
+        return
+    base = base[base.data.between(pd.Timestamp(intervalo[0]), pd.Timestamp(intervalo[1]))]
+    if base.empty:
+        st.info("Sem pares de datas no período selecionado.")
+        return
+    st.caption(f"{estacao} · água medida · ar modelado · fuso America/Sao_Paulo. "
+               "Cada média hídrica exige 216 leituras válidas em 288; ausências não são zero. "
+               "Correlação sem ajuste por chuva e sem inferência; a matriz informa coeficientes descritivos.")
     c1, c2, c3 = st.columns(3)
-    c1.metric("Pares município-dia", len(base))
+    c1.metric("Dias com integração", len(base))
     c2.metric("Municípios cruzados", base["municipio"].nunique())
     c3.metric("Período", f"{base['data'].min().strftime('%d/%m/%Y')} a {base['data'].max().strftime('%d/%m/%Y')}")
 
@@ -2951,7 +2946,7 @@ def exibir_aba_integracao(
         "🕒 Série temporal",
         "🔥 Correlação",
         "📆 Médias semanais/mensais",
-        "⏭️ Efeito defasado",
+        "⏭️ Associação defasada",
         "🗺️ Mapa intensidade",
         "🧩 Matriz de dispersão",
         "🤖 ML turbidez",
@@ -2986,7 +2981,7 @@ def exibir_aba_integracao(
                 )
                 fig = _adicionar_linha_tendencia(fig, tmp[particula], tmp[indicador])
                 with coluna:
-                    renderizar_grafico(fig, use_container_width=True)
+                    renderizar_grafico(fig, width="stretch")
         else:
             st.info("A base cruzada ainda não tem indicadores de água suficientes para comparar com PM2.5 e PM10.")
 
@@ -2996,7 +2991,7 @@ def exibir_aba_integracao(
             st.caption("Spearman ρ resume a direção e a intensidade de uma associação monotônica; não demonstra causalidade nem substitui teste estatístico.")
             exibicao = associacoes.copy()
             exibicao["Spearman ρ"] = exibicao["Spearman ρ"].round(3)
-            st.dataframe(exibicao, use_container_width=True, hide_index=True)
+            st.dataframe(exibicao, width="stretch", hide_index=True)
 
     with abas[1]:
         particulas_cols = [c for c in ["pm25", "pm10"] if c in base.columns]
@@ -3018,14 +3013,14 @@ def exibir_aba_integracao(
                     title="Concentração diária de partículas (μg/m³)",
                     labels={c: nome_amigavel_variavel(c) for c in particulas_cols},
                 )
-                renderizar_grafico(fig_ar, use_container_width=True)
+                renderizar_grafico(fig_ar, width="stretch")
             with col_agua:
                 fig_agua = px.line(
                     serie, x="data", y=agua_escolhida, markers=True,
                     title=f"Série diária — {nome_amigavel_variavel(agua_escolhida)}",
                     labels={agua_escolhida: nome_amigavel_variavel(agua_escolhida)},
                 )
-                renderizar_grafico(fig_agua, use_container_width=True)
+                renderizar_grafico(fig_agua, width="stretch")
 
     with abas[2]:
         heat_cols = [c for c in [
@@ -3033,9 +3028,11 @@ def exibir_aba_integracao(
         ] if c in base.columns and base[c].notna().sum() >= 3]
         if len(heat_cols) >= 3:
             corr = base[heat_cols].corr(method="spearman", numeric_only=True)
-            fig = px.imshow(corr, text_auto=True, aspect="auto", zmin=-1, zmax=1, color_continuous_scale="RdBu", title="Associação de Spearman — partículas, água e chuva")
-            renderizar_grafico(fig, use_container_width=True)
-            st.caption("A matriz usa pares disponíveis em cada combinação. Valores próximos de −1 ou +1 indicam associação monotônica; associação não comprova deposição nem causalidade.")
+            fig = px.imshow(corr, text_auto=True, aspect="auto", zmin=-1, zmax=1, color_continuous_scale="RdBu", title=f"{estacao} · Spearman descritivo — partículas, água e chuva")
+            renderizar_grafico(fig, width="stretch")
+            st.caption("A matriz usa pares completos de cada combinação nesta estação, sem ajuste por chuva e sem significância inferencial. A tabela abaixo mostra n por célula.")
+            validos_heat = base[heat_cols].notna().astype(int)
+            st.dataframe(validos_heat.T.dot(validos_heat), width="stretch")
         else:
             st.info("Sem variáveis suficientes para o heatmap.")
 
@@ -3058,12 +3055,12 @@ def exibir_aba_integracao(
             col_ar, col_agua = st.columns(2)
             with col_ar:
                 fig_ar = px.line(agregado, x="data", y=particulas_cols, markers=True, title=f"Médias {periodicidade.lower()} de PM2.5/PM10 (μg/m³)")
-                renderizar_grafico(fig_ar, use_container_width=True)
+                renderizar_grafico(fig_ar, width="stretch")
             with col_agua:
                 fig_agua = px.line(agregado, x="data", y=agua_escolhida, markers=True, title=f"Média {periodicidade.lower()} — {nome_amigavel_variavel(agua_escolhida)}")
-                renderizar_grafico(fig_agua, use_container_width=True)
+                renderizar_grafico(fig_agua, width="stretch")
             colunas_tabela = ["data"] + particulas_cols + [agua_escolhida]
-            st.dataframe(agregado[colunas_tabela].rename(columns={c: nome_amigavel_variavel(c) for c in colunas_tabela if c != "data"}), use_container_width=True, hide_index=True)
+            st.dataframe(agregado[colunas_tabela].rename(columns={c: nome_amigavel_variavel(c) for c in colunas_tabela if c != "data"}), width="stretch", hide_index=True)
 
     with abas[4]:
         indicadores_agua = [c for c in ["turbidez", "ph", "oxigenio_dissolvido", "condutividade"] if c in base.columns and base[c].notna().sum() >= 3]
@@ -3071,7 +3068,7 @@ def exibir_aba_integracao(
         if not indicadores_agua or not particulas_cols:
             st.info("Sem dados coincidentes suficientes de partículas e indicadores da água para a análise defasada.")
         else:
-            agua_escolhida = st.selectbox("Indicador futuro da água", indicadores_agua, format_func=nome_amigavel_variavel, key=f"lag_agua_{normalizar_texto(area)}")
+            agua_escolhida = st.selectbox("Indicador hídrico na data t + defasagem", indicadores_agua, format_func=nome_amigavel_variavel, key=f"lag_agua_{normalizar_texto(area)}")
             atraso = st.slider("Defasagem entre as datas (dias)", 1, 3, 1, key=f"lag_dias_{normalizar_texto(area)}")
             base_lag = base.sort_values(["municipio", "data"]).copy()
             futura = base_lag[["municipio", "data", agua_escolhida]].copy()
@@ -3086,11 +3083,11 @@ def exibir_aba_integracao(
                     continue
                 fig = px.scatter(
                     tmp, x=particula, y="indicador_futuro", color="municipio", hover_name="municipio",
-                    title=f"{nome_amigavel_variavel(particula)} hoje × {nome_amigavel_variavel(agua_escolhida)} em {atraso} dia(s)",
+                    title=f"{nome_amigavel_variavel(particula)} em t × {nome_amigavel_variavel(agua_escolhida)} em {atraso} dia(s)",
                 )
                 fig = _adicionar_linha_tendencia(fig, tmp[particula], tmp["indicador_futuro"])
                 with coluna:
-                    renderizar_grafico(fig, use_container_width=True)
+                    renderizar_grafico(fig, width="stretch")
             st.caption("A defasagem compara dias de calendário exatos. Mudanças podem refletir chuva, vazão, uso do solo ou outras fontes; não atribua a variação apenas à deposição atmosférica.")
 
     with abas[5]:
@@ -3111,7 +3108,7 @@ def exibir_aba_integracao(
                 center={"lat": mapa_base["Latitude"].mean(), "lon": mapa_base["Longitude"].mean()},
                 title=f"Mapa de intensidade — {nome_amigavel_variavel(escolha)}",
             )
-            renderizar_grafico(fig, use_container_width=True, key=f"mapa_int_{normalizar_texto(area)}_{escolha}")
+            renderizar_grafico(fig, width="stretch", key=f"mapa_int_{normalizar_texto(area)}_{escolha}")
 
     with abas[6]:
         vars_matriz = [c for c in ["pm25", "pm10", "no2", "o3", "turbidez", "ph", "precipitacao_agua", "condutividade"] if c in base.columns and base[c].notna().sum() >= 3]
@@ -3124,7 +3121,7 @@ def exibir_aba_integracao(
             labels = {col: nome_amigavel_variavel(col) for col in vars_matriz}
             fig = px.scatter_matrix(matriz, dimensions=vars_matriz, color="municipio", title="Matriz de dispersão entre poluentes do ar, água e clima", labels=labels)
             fig.update_traces(diagonal_visible=False, showupperhalf=False)
-            renderizar_grafico(fig, use_container_width=True)
+            renderizar_grafico(fig, width="stretch")
 
     with abas[7]:
         payload = rodar_modelagem_turbidez(base)
@@ -3143,19 +3140,23 @@ def exibir_aba_integracao(
                 )
             else:
                 st.info("Há dados para ajustar um modelo exploratório, mas poucos dias para formar um teste temporal separado.")
-            st.caption("Preditores: " + ", ".join(payload["features"]) + ". Importância preditiva não significa causa.")
+            if "MAE_REFERENCIA" in metricas:
+                st.metric("MAE da referência pela média do treino", formatar_decimal_br(metricas["MAE_REFERENCIA"], 2, " NTU"))
+                if metricas.get("MAE", np.inf) >= metricas["MAE_REFERENCIA"] or metricas.get("R2", -1) < 0:
+                    st.warning("O modelo não demonstrou ganho sobre a referência; não produz recomendação operacional.")
+            st.caption("Estimativa contemporânea, sem horizonte futuro. Preditores: " + ", ".join(payload["features"]) + ". Importância preditiva não significa causa.")
             base_ml = payload["base"].dropna(subset=["turbidez_prevista"]).copy()
             if not base_ml.empty:
                 fig = px.scatter(base_ml, x="turbidez", y="turbidez_prevista", color="municipio", hover_name="municipio", title="Turbidez observada × estimada no teste temporal")
                 minimo = float(base_ml[["turbidez", "turbidez_prevista"]].min().min())
                 maximo = float(base_ml[["turbidez", "turbidez_prevista"]].max().max())
                 fig.add_shape(type="line", x0=minimo, y0=minimo, x1=maximo, y1=maximo)
-                renderizar_grafico(fig, use_container_width=True)
+                renderizar_grafico(fig, width="stretch")
             fig_imp = px.bar(payload["importancias"], x="Importância", y="Variável", orientation="h", title="Importância preditiva das variáveis no ajuste final")
-            renderizar_grafico(fig_imp, use_container_width=True)
+            renderizar_grafico(fig_imp, width="stretch")
 
     with abas[8]:
-        st.dataframe(base.sort_values(["municipio", "data"]), use_container_width=True, hide_index=True)
+        st.dataframe(base.sort_values(["municipio", "data"]), width="stretch", hide_index=True)
         st.download_button(
             "📥 Baixar base integrada (CSV)",
             data=base.to_csv(index=False).encode("utf-8"),
@@ -3163,430 +3164,30 @@ def exibir_aba_integracao(
             mime="text/csv",
         )
 
-def rodar_modelagem_qualidade_ar(df_atual: pd.DataFrame) -> dict[str, dict[str, Any]]:
-    resultados: dict[str, dict[str, Any]] = {}
-    if df_atual.empty or RandomForestRegressor is None:
-        return resultados
-    features = [c for c in ["Temperatura", "Umidade", "Vento", "Chuva", "População"] if c in df_atual.columns]
-    if len(features) < 2:
-        return resultados
-    X = df_atual[features].apply(pd.to_numeric, errors="coerce").fillna(df_atual[features].median(numeric_only=True))
-    for alvo in ["PM2.5", "NO2"]:
-        if alvo not in df_atual.columns:
-            continue
-        y = pd.to_numeric(df_atual[alvo], errors="coerce")
-        mascara = y.notna()
-        if mascara.sum() < 8:
-            continue
-        X_ok = X.loc[mascara].copy()
-        y_ok = y.loc[mascara].copy()
-        base_ok = df_atual.loc[mascara].copy()
-        metricas = {}
-        if train_test_split is not None and len(base_ok) >= 10:
-            X_train, X_test, y_train, y_test, idx_train, idx_test = train_test_split(X_ok, y_ok, base_ok.index, test_size=0.3, random_state=42)
-            modelo = RandomForestRegressor(n_estimators=300, random_state=42)
-            modelo.fit(X_train, y_train)
-            y_pred = modelo.predict(X_test)
-            base_ok.loc[idx_test, "previsto_rf"] = y_pred
-            acuracia = calcular_acuracia_percentual(y_test, y_pred)
-            if pd.notna(acuracia):
-                metricas["ACURACIA"] = acuracia
-            if mean_absolute_error is not None:
-                metricas["MAE"] = float(mean_absolute_error(y_test, y_pred))
-            if r2_score is not None and len(y_test) >= 2:
-                metricas["R2"] = float(r2_score(y_test, y_pred))
-        else:
-            modelo = RandomForestRegressor(n_estimators=300, random_state=42)
-            modelo.fit(X_ok, y_ok)
-            base_ok["previsto_rf"] = modelo.predict(X_ok)
-        importancias = pd.DataFrame({"Variavel": features, "Importancia": modelo.feature_importances_}).sort_values("Importancia", ascending=False)
-        resultados[alvo] = {"base": base_ok, "metricas": metricas, "importancias": importancias}
-    return resultados
-
-def exibir_bloco_predicao_qualidade_ar(df_atual: pd.DataFrame, area: str) -> None:
-    st.markdown("### Predição de qualidade do ar")
-    st.markdown("Este bloco mantém a modelagem automática com dados meteorológicos e poluentes para apoio ao EcoRadar.")
-    resultados = rodar_modelagem_qualidade_ar(df_atual)
-    if not resultados:
-        st.info("São necessárias observações municipais com temperatura, umidade, vento, chuva e poluentes para estimar PM2.5/NO2.")
-        return
-    abas = st.tabs([f"🌫️ {alvo}" for alvo in resultados.keys()])
-    for aba, alvo in zip(abas, resultados.keys()):
-        payload = resultados[alvo]
-        with aba:
-            exibir_cards_metricas_modelo(payload["metricas"], unidade_mae=" μg/m³")
-            base = payload["base"]
-            fig = px.scatter(base.dropna(subset=["previsto_rf"]), x=alvo, y="previsto_rf", hover_name="Cidade", title=f"Observado × previsto — {alvo}")
-            minimo = float(base[[alvo, "previsto_rf"]].min().min())
-            maximo = float(base[[alvo, "previsto_rf"]].max().max())
-            fig.add_shape(type="line", x0=minimo, y0=minimo, x1=maximo, y1=maximo)
-            renderizar_grafico(fig, use_container_width=True)
-            fig_imp = px.bar(payload["importancias"], x="Importancia", y="Variavel", orientation="h", title=f"Importância das variáveis meteorológicas — {alvo}")
-            renderizar_grafico(fig_imp, use_container_width=True)
 
 
 
-def _treinar_modelo_simulador_agua(
-    base: pd.DataFrame,
-    alvo: str,
-    top_n: int = 4,
-) -> Optional[dict[str, Any]]:
-    """Treina um simulador exploratório com teste temporal para parâmetros da água."""
-    if base.empty or RandomForestRegressor is None or alvo not in base.columns:
-        return None
-
-    candidatos = [
-        "pm25", "pm10", "chuva_openmeteo", "temp_max_openmeteo", "temp_min_openmeteo",
-        "vento_max_openmeteo", "no2", "o3", "so2",
-    ]
-    features = [
-        coluna for coluna in candidatos
-        if coluna in base.columns and pd.to_numeric(base[coluna], errors="coerce").notna().sum() >= 6
-    ]
-    if not any(coluna in features for coluna in ["pm25", "pm10"]):
-        return None
-
-    trabalho = base[["data", alvo] + (["municipio"] if "municipio" in base.columns else []) + features].copy()
-    trabalho["data"] = pd.to_datetime(trabalho["data"], errors="coerce")
-    trabalho[alvo] = pd.to_numeric(trabalho[alvo], errors="coerce")
-    trabalho = trabalho.dropna(subset=["data", alvo]).sort_values(["data", "municipio"] if "municipio" in trabalho else ["data"]).copy()
-    if len(trabalho) < 20:
-        return None
-
-    X = trabalho[features].apply(pd.to_numeric, errors="coerce")
-    y = trabalho[alvo]
-    idx_treino, idx_teste = _indices_particao_temporal(trabalho)
-    if len(idx_treino) < 12 or len(idx_teste) < 4:
-        return None
-
-    X_treino_raw = X.loc[idx_treino].copy()
-    X_teste_raw = X.loc[idx_teste].copy()
-    medianas_treino = X_treino_raw.median(numeric_only=True)
-    validas = medianas_treino[medianas_treino.notna()].index.tolist()
-    if not any(coluna in validas for coluna in ["pm25", "pm10"]):
-        return None
-    X_treino = X_treino_raw[validas].fillna(medianas_treino[validas])
-    X_teste = X_teste_raw[validas].fillna(medianas_treino[validas])
-
-    # A seleção de variáveis e a avaliação usam somente os dias mais antigos.
-    seletor = RandomForestRegressor(n_estimators=350, min_samples_leaf=2, random_state=42)
-    seletor.fit(X_treino, y.loc[idx_treino])
-    ranking = pd.DataFrame({
-        "variavel": validas,
-        "importancia": seletor.feature_importances_,
-    }).sort_values("importancia", ascending=False)
-
-    features_top = ranking.head(min(top_n, len(ranking)))["variavel"].tolist()
-    X_treino_top = X_treino[features_top].copy()
-    X_teste_top = X_teste[features_top].copy()
-    metricas: dict[str, float] = {}
-    avaliador = RandomForestRegressor(n_estimators=400, min_samples_leaf=2, random_state=42)
-    avaliador.fit(X_treino_top, y.loc[idx_treino])
-    previsto = avaliador.predict(X_teste_top)
-    if mean_absolute_error is not None:
-        metricas["MAE"] = float(mean_absolute_error(y.loc[idx_teste], previsto))
-    if r2_score is not None and len(idx_teste) >= 2:
-        metricas["R2"] = float(r2_score(y.loc[idx_teste], previsto))
-    metricas["N_TREINO"] = float(len(idx_treino))
-    metricas["N_TESTE"] = float(len(idx_teste))
-
-    # O cenário interativo usa um ajuste final treinado com todos os registros disponíveis.
-    medianas_finais = X[features_top].median(numeric_only=True)
-    X_final = X[features_top].fillna(medianas_finais)
-    modelo = RandomForestRegressor(n_estimators=450, min_samples_leaf=2, random_state=42)
-    modelo.fit(X_final, y)
-
-    importancia_final = pd.DataFrame({
-        "variavel": features_top,
-        "importancia": modelo.feature_importances_,
-    }).sort_values("importancia", ascending=False)
-
-    estatisticas: dict[str, dict[str, float]] = {}
-    for coluna in features_top:
-        serie = pd.to_numeric(trabalho[coluna], errors="coerce")
-        estatisticas[coluna] = {
-            "mediana": float(serie.median()),
-            "min": float(serie.min()),
-            "max": float(serie.max()),
-        }
-
-    alvo_serie = pd.to_numeric(trabalho[alvo], errors="coerce")
-    alvo_stats = {
-        "mediana": float(alvo_serie.median()),
-        "min": float(alvo_serie.min()),
-        "max": float(alvo_serie.max()),
-        "media": float(alvo_serie.mean()),
-    }
-
-    return {
-        "alvo": alvo,
-        "modelo": modelo,
-        "features": features_top,
-        "importancias": importancia_final,
-        "estatisticas": estatisticas,
-        "alvo_stats": alvo_stats,
-        "metricas": metricas,
-        "n": int(len(trabalho)),
-    }
 
 
-def _frase_comparacao_simulador(valor: float, mediana: float, nome: str, unidade: str = "") -> str:
-    if not np.isfinite(valor) or not np.isfinite(mediana):
-        return f"Estimativa de {nome}: {_numero_br(valor, 2)}{unidade}."
-    diferenca = valor - mediana
-    tolerancia = max(abs(mediana) * 0.05, 0.05)
-    if abs(diferenca) <= tolerancia:
-        return (
-            f"A estimativa de {nome} fica próxima da mediana observada no recorte "
-            f"({_numero_br(mediana, 2)}{unidade})."
-        )
-    direcao = "acima" if diferenca > 0 else "abaixo"
-    return (
-        f"A estimativa de {nome} fica {direcao} da mediana observada no recorte "
-        f"({_numero_br(mediana, 2)}{unidade})."
-    )
 
 
-def _card_ranking_simulador(titulo: str, payload: Optional[dict[str, Any]], icone: str) -> None:
-    if not payload:
-        st.markdown(
-            f"""
-            <div class='section-card'>
-                <h3>{icone} {html.escape(titulo)}</h3>
-                <p>Não há dados integrados suficientes para selecionar variáveis e treinar este modelo.</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        return
-
-    ranking = payload["importancias"].copy()
-    total = float(ranking["importancia"].sum()) if not ranking.empty else 0.0
-    itens = []
-    for _, row in ranking.iterrows():
-        nome = nome_amigavel_variavel(str(row["variavel"]))
-        pct = (float(row["importancia"]) / total * 100.0) if total > 0 else 0.0
-        itens.append(
-            f"<li><strong>{html.escape(nome)}</strong> — aproximadamente {_numero_br(pct, 1)}% da importância do modelo.</li>"
-        )
-
-    qualidade = ""
-    if payload.get("metricas"):
-        m = payload["metricas"]
-        partes = []
-        if "MAE" in m:
-            partes.append(f"MAE {_numero_br(m['MAE'], 2)}")
-        if "R2" in m:
-            partes.append(f"R² {_numero_br(m['R2'], 2)}")
-        if partes:
-            qualidade = " • Validação: " + " | ".join(partes)
-
-    st.markdown(
-        f"""
-        <div class='section-card'>
-            <h3>{icone} {html.escape(titulo)}</h3>
-            <p>O simulador selecionou as variáveis com maior importância preditiva no trecho de treino. Essa importância não representa causa ou efeito ambiental.</p>
-            <ul style='margin-top:0.7rem;margin-bottom:0.4rem;color:var(--text-soft);line-height:1.6'>{''.join(itens)}</ul>
-            <div class='card-footnote'>{payload['n']} registros usados{html.escape(qualidade)}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
-def exibir_aba_simulador(
-    df_simqua: pd.DataFrame,
-    df_openmeteo_ar: pd.DataFrame,
-    df_clima_openmeteo: pd.DataFrame,
-    area: str,
-) -> None:
-    st.markdown("### 🧪 Cenários exploratórios para pH e turbidez")
-    st.markdown(
-        """
-        <div class='section-card'>
-            <h3>Como funciona</h3>
-            <p>
-                Informe níveis de <strong>PM2.5 e PM10</strong> e, quando disponíveis, chuva e condições meteorológicas.
-                O Random Forest foi ajustado com os dados diários integrados para estimar <strong>pH</strong> e
-                <strong>turbidez</strong>. A seleção de variáveis e a avaliação usam uma separação temporal entre
-                dias antigos e posteriores.
-            </p>
-            <div class='card-footnote'>
-                Este cenário é uma exploração matemática do conjunto observado, não uma medição ou previsão operacional.
-                Não substitui análise laboratorial ou monitoramento CETESB/SIMQUA e não demonstra que PM tenha causado
-                alteração na água; o app não mede deposição atmosférica nem a composição química do material particulado.
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
-    if df_simqua.empty or df_openmeteo_ar.empty:
-        st.warning("O simulador precisa de dados do SIMQUA e do histórico de qualidade do ar no mesmo período.")
-        return
+def exibir_aba_simulador(df_simqua: pd.DataFrame, df_openmeteo_ar: pd.DataFrame,
+                       df_clima_openmeteo: pd.DataFrame, area: str) -> None:
+    st.markdown("### Simulação exploratória")
+    st.warning("As recomendações automáticas foram bloqueadas na versão de entrega. "
+               "O Random Forest do artigo não superou a referência pela média do treino. "
+               "Consulte as métricas e as estimativas contemporâneas arquivadas; não há previsão futura validada.")
 
-    base = montar_base_integrada(df_openmeteo_ar, df_simqua, df_clima_openmeteo)
-    if base.empty:
-        st.warning("Não houve datas coincidentes entre as bases de ar e água para montar o simulador.")
-        return
-
-    dias_simqua = int(pd.to_datetime(df_simqua["data"], errors="coerce").dt.date.nunique()) if "data" in df_simqua.columns else 0
-    dias_ar = int(pd.to_datetime(df_openmeteo_ar["data"], errors="coerce").dt.date.nunique()) if "data" in df_openmeteo_ar.columns else 0
-    dias_integrados = int(pd.to_datetime(base["data"], errors="coerce").dt.date.nunique()) if "data" in base.columns else 0
-    d1, d2, d3 = st.columns(3)
-    d1.metric("Dias SIMQUA", dias_simqua)
-    d2.metric("Dias de ar compatíveis", dias_ar)
-    d3.metric("Dias cruzados", dias_integrados)
-    st.caption("O treino cruza médias diárias de ar modeladas pelo CAMS/Open-Meteo e medições do SIMQUA nas datas e municípios coincidentes.")
-
-    modelo_turbidez = _treinar_modelo_simulador_agua(base, "turbidez")
-    modelo_ph = _treinar_modelo_simulador_agua(base, "ph")
-
-    c1, c2 = st.columns(2)
-    with c1:
-        _card_ranking_simulador("Variáveis mais relevantes para turbidez", modelo_turbidez, "🌫️")
-    with c2:
-        _card_ranking_simulador("Variáveis mais relevantes para pH", modelo_ph, "💧")
-
-    modelos_disponiveis = [p for p in [modelo_turbidez, modelo_ph] if p]
-    if not modelos_disponiveis:
-        valid_turb = int(pd.to_numeric(base.get("turbidez"), errors="coerce").notna().sum()) if "turbidez" in base.columns else 0
-        valid_ph = int(pd.to_numeric(base.get("ph"), errors="coerce").notna().sum()) if "ph" in base.columns else 0
-        st.info(
-            f"O cruzamento produziu {len(base)} registro(s) diário(s), com {valid_turb} valor(es) de turbidez "
-            f"e {valid_ph} valor(es) de pH disponíveis. Para treinar o simulador são necessários pelo menos "
-            "20 pares município-dia válidos de indicador da água e PM2.5 ou PM10, com datas suficientes para teste temporal."
-        )
-        return
-
-    features_form: list[str] = []
-    for payload in modelos_disponiveis:
-        for feature in payload["features"]:
-            if feature not in features_form:
-                features_form.append(feature)
-
-    # Estatísticas combinadas para sugerir valores iniciais e mostrar a faixa observada.
-    stats_form: dict[str, dict[str, float]] = {}
-    for feature in features_form:
-        serie = pd.to_numeric(base.get(feature), errors="coerce")
-        if serie is None or serie.dropna().empty:
-            continue
-        stats_form[feature] = {
-            "mediana": float(serie.median()),
-            "min": float(serie.min()),
-            "max": float(serie.max()),
-        }
-
-    st.markdown("#### Informe partículas e variáveis meteorológicas")
-    st.caption("Os campos começam com a mediana observada no recorte. Testes fora da faixa observada são extrapolações.")
-
-    valores_usuario: dict[str, float] = {}
-    with st.form(key=f"form_simulador_agua_{normalizar_texto(area)}"):
-        colunas = st.columns(2)
-        for i, feature in enumerate(features_form):
-            stats = stats_form.get(feature, {"mediana": 0.0, "min": 0.0, "max": 0.0})
-            nome = nome_amigavel_variavel(feature)
-            ajuda = (
-                f"Faixa observada no recorte: {_numero_br(stats['min'], 2)} a {_numero_br(stats['max'], 2)}. "
-                "É possível testar valores fora dessa faixa, mas a incerteza da estimativa aumenta."
-            )
-            with colunas[i % 2]:
-                valores_usuario[feature] = st.number_input(
-                    nome,
-                    value=float(round(stats["mediana"], 2)),
-                    step=0.10,
-                    format="%.2f",
-                    help=ajuda,
-                    key=f"sim_{normalizar_texto(area)}_{feature}",
-                )
-        enviar = st.form_submit_button("🧪 Gerar cenário exploratório", type="primary")
-
-    if enviar:
-        resultado: dict[str, Any] = {"area": area, "entradas": dict(valores_usuario)}
-        for nome_modelo, payload in [("turbidez", modelo_turbidez), ("ph", modelo_ph)]:
-            if not payload:
-                continue
-            linha = pd.DataFrame([[valores_usuario[f] for f in payload["features"]]], columns=payload["features"])
-            pred = float(payload["modelo"].predict(linha)[0])
-            if nome_modelo == "turbidez":
-                pred = max(0.0, pred)
-            elif nome_modelo == "ph":
-                pred = float(np.clip(pred, 0.0, 14.0))
-            resultado[nome_modelo] = pred
-        st.session_state["resultado_simulador_agua"] = resultado
-
-    resultado = st.session_state.get("resultado_simulador_agua")
-    if not resultado or resultado.get("area") != area:
-        return
-
-    st.markdown("#### Resultado da simulação")
-    saidas = []
-    if "turbidez" in resultado and modelo_turbidez:
-        saidas.append(("🌫️", "Turbidez estimada", resultado["turbidez"], " NTU", modelo_turbidez))
-    if "ph" in resultado and modelo_ph:
-        saidas.append(("💧", "pH estimado", resultado["ph"], "", modelo_ph))
-
-    cols_saida = st.columns(len(saidas)) if saidas else []
-    for col, (icone, titulo, valor, unidade, payload) in zip(cols_saida, saidas):
-        mediana = payload["alvo_stats"]["mediana"]
-        conclusao = _frase_comparacao_simulador(
-            valor,
-            mediana,
-            "turbidez" if "Turbidez" in titulo else "pH",
-            unidade,
-        )
-        with col:
-            st.markdown(
-                f"""
-                <div class='model-metric-card' style='min-height:190px'>
-                    <div class='model-metric-head'>
-                        <div class='model-metric-icon'>{icone}</div>
-                        <div class='model-metric-title'>{html.escape(titulo)}</div>
-                    </div>
-                    <div class='model-metric-value'>{_numero_br(valor, 2)}{html.escape(unidade)}</div>
-                    <div class='model-metric-caption'>{html.escape(conclusao)}</div>
-                    <div class='model-metric-formula'>Cenário estimado com os preditores selecionados no ajuste do modelo.</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    if saidas:
-        partes = []
-        if "turbidez" in resultado:
-            partes.append(f"turbidez próxima de {_numero_br(resultado['turbidez'], 2)} NTU")
-        if "ph" in resultado:
-            partes.append(f"pH próximo de {_numero_br(resultado['ph'], 2)}")
-        st.markdown(
-            f"""
-            <div class='section-card' style='margin-top:0.9rem'>
-                <h3>📌 Conclusão simples</h3>
-                <p>Com os valores atmosféricos informados, o modelo estima {' e '.join(partes)} no recorte selecionado.</p>
-                <div class='card-footnote'>
-                    Interprete o resultado como uma hipótese computacional para exploração no EcoRadar, e não como medição real da qualidade da água.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with st.expander("Ver valores usados na simulação", expanded=False):
-        tabela = pd.DataFrame({
-            "Variável": [nome_amigavel_variavel(k) for k in resultado["entradas"].keys()],
-            "Valor informado": list(resultado["entradas"].values()),
-        })
-        st.dataframe(tabela, use_container_width=True, hide_index=True)
 
 def exibir_aba_modelagem(df_atual: pd.DataFrame, area: str) -> None:
-    st.markdown("### Contexto complementar: qualidade do ar")
-    st.markdown(
-        """
-        Esta análise meteorológica complementa o TCC, mas não responde à pergunta principal sobre partículas e água.
-        A relação central é explorada na aba **Partículas atmosféricas e qualidade da água**, com PM2.5/PM10,
-        indicadores do SIMQUA e chuva.
-        """
-    )
-    exibir_bloco_predicao_qualidade_ar(df_atual, area)
+    st.markdown("### Contexto complementar da qualidade do ar")
+    st.info("O módulo histórico PM₂,₅/NO₂ usava divisão aleatória e o rótulo 100 − MAPE. "
+            "Essa saída foi retirada da interface de entrega, pois não valida desempenho em datas futuras. "
+            "A avaliação reproduzível de turbidez está no modo Execução arquivada do artigo.")
+
 
 with st.sidebar:
     exibir_logo_sidebar()
@@ -3610,6 +3211,13 @@ with st.sidebar:
 
 def main() -> None:
     aplicar_tema_interface(modo_visual)
+    arquivo_disponivel = (BASE_DIR / "suplementar" / "manifesto.json").is_file()
+    modo_arquivo = st.sidebar.checkbox("Execução arquivada do artigo (sem APIs ao vivo)", value=arquivo_disponivel)
+    if modo_arquivo:
+        from ecoradar_interface import exibir_execucao_arquivada
+        exibir_execucao_arquivada(BASE_DIR)
+        return
+    st.warning("Modo de consulta ao vivo: valores podem mudar e não substituem a execução histórica do artigo. Protótipo sem validação operacional.")
     cidades_selecionadas = obter_cidades_area(area_escolhida)
     nome_area = area_escolhida
     nomes_area = nomes_municipios(cidades_selecionadas)
@@ -3629,8 +3237,8 @@ def main() -> None:
 
         # Para integrar com o SIMQUA, buscamos ar e clima no MESMO período histórico da água.
         df_ar_historico_simqua, df_clima_historico_simqua = montar_bases_historicas_compativeis_simqua(df_simqua)
-        df_cetesb_ar = df_ar_historico_simqua if not df_ar_historico_simqua.empty else df_cetesb_ar_recente
-        df_clima_openmeteo = df_clima_historico_simqua if not df_clima_historico_simqua.empty else df_clima_recente
+        df_cetesb_ar = df_ar_historico_simqua
+        df_clima_openmeteo = df_clima_historico_simqua
 
     exibir_topo_dashboard(df_atual, df_simqua, nome_area, nomes_area)
     exibir_contexto_projeto(nome_area, nomes_area)
