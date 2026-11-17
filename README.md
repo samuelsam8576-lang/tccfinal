@@ -27,7 +27,7 @@ python -m pip install -r requirements.txt
 python -m unittest test_metodo test_interface -v
 ```
 
-`suplementar/LEIA_ME.md` descreve a função dos JSON, CSV, metadados e hashes. `RESPOSTAS_BANCA.md` reúne as respostas às questões apresentadas na banca.
+`duvidasdoecoradar.md` reúne as respostas às indicações da banca; `suplementar/LEIA_ME.md` explica os arquivos incluídos no pacote ZIP.
 
 ## Período e resultados
 

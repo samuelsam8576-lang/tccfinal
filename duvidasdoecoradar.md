@@ -40,7 +40,7 @@ Essa interpretação é uma hipótese, não uma conclusão causal. Vazão, opera
 
 ## Onde está o material suplementar
 
-No mesmo repositório do código, na pasta `suplementar/`, e nas entradas `data/`. O artigo informa um endereço fixado na revisão de entrega. A pasta contém os nove JSON brutos, URLs e horários de consulta, a base de 291 linhas, os 96 coeficientes, os 5.568 pareamentos por data, as 48 estimativas do teste, métricas, imputação, versões e hashes. `suplementar/LEIA_ME.md` descreve cada arquivo e a reprodução.
+O pacote `EcoRadar_TCC_Revisado_Com_Suplementar.zip` está disponível no [repositório do EcoRadar](https://github.com/samuelsam8576-lang/tccfinal/tree/tcc-revisao-banca-2026-11) e pode ser baixado diretamente [neste link](https://github.com/samuelsam8576-lang/tccfinal/blob/tcc-revisao-banca-2026-11/EcoRadar_TCC_Revisado_Com_Suplementar.zip). Depois de extraí-lo, os três CSV hídricos ficam em `data/` e os arquivos da execução em `suplementar/`: nove respostas JSON e metadados, base diária integrada, 96 coeficientes, 5.568 pareamentos, métricas, predições, imputação, comparação das árvores e manifesto SHA-256. `suplementar/LEIA_ME.md` explica cada arquivo e a reprodução; `suplementar/VERIFICACAO.md` registra os resultados reproduzidos e informa que os 12 testes automatizados não foram executados nesta conferência por falta de Plotly e Streamlit.
 
 ## Onde entra o JSON
 
