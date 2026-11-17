@@ -41,8 +41,8 @@ def exibir_execucao_arquivada(root):
     st.caption("Água: medições dos CSV SIMQUA fornecidos. Ar: estimativas CAMS/Open-Meteo em grade de cerca de 45 km, "
                "nas coordenadas municipais. Meteorologia: estimativas históricas Open-Meteo. "
                "Execução histórica fixa de 01/01/2026 a 07/04/2026, sem atualização em tempo real.")
-    consultas = json.loads((Path(root) / "suplementar" / "consultas.json").read_text())
-    metas = [json.loads((Path(root) / "suplementar" / "json_bruto" / Path(c["arquivo"]).with_suffix(".meta.json")).read_text()) for c in consultas]
+    consultas = json.loads((Path(root) / "suplementar" / "consultas.json").read_text(encoding="utf-8"))
+    metas = [json.loads((Path(root) / "suplementar" / "json_bruto" / Path(c["arquivo"]).with_suffix(".meta.json")).read_text(encoding="utf-8")) for c in consultas]
     st.caption("JSON consultados em UTC: " + min(m["consultado_em_utc"] for m in metas) + " a " + max(m["consultado_em_utc"] for m in metas))
     estacao = st.selectbox("Estação da série e das correlações", sorted(base.estacao.unique()))
     g = base[base.estacao == estacao].copy()

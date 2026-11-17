@@ -45,6 +45,8 @@ python -m pip install -r requirements-reproducao.txt
 python reproduzir_artigo.py --offline
 ```
 
+No Windows, execute os comandos no PowerShell a partir da pasta interna `EcoRadar_TCC_Revisado` (a que contém `reproduzir_artigo.py`). Os JSON são lidos explicitamente em UTF-8 para preservar corretamente unidades e caracteres acentuados.
+
 O modo offline exige os nove JSON e seus metadados com hashes compatíveis. Ele não tenta a API nem gera valores substitutos. A reprodução grava as saídas derivadas e atualiza o registro de execução, mas preserva os JSON brutos.
 
 Para conferir os testes e abrir a interface:
