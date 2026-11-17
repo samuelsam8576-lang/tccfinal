@@ -31,6 +31,8 @@ Os CSV hídricos fornecidos pelos autores estão em `../data/`. Eles contêm 82.
 | `metricas_modelo_turbidez.csv` | Métricas, períodos e tamanhos dos conjuntos da Tabela 4 |
 | `previsoes_teste_turbidez.csv` | 48 valores observados, estimativas do RF e referência no teste |
 | `imputacao_treino.csv` | Medianas ajustadas exclusivamente no treino |
+| `sensibilidade_arvores.csv` | Médias e desvios das métricas em três dobras temporais para 50, 100, 200, 350 e 500 árvores, com referência pela média do treino |
+| `sensibilidade_arvores_dobras.csv` | Métricas e intervalos de datas de cada dobra, sem misturar a mesma data entre treino e validação |
 | `ambiente.json` | Versões e horário da última reprodução |
 | `manifesto.json` | Lista de entradas e saídas com tamanho e SHA-256 |
 
@@ -86,7 +88,9 @@ Para gerar a Figura 5, execute `python gerar_figura_teste.py` (Matplotlib nas de
 - As combinações compartilham séries, partículas e datas; 24 sinais negativos de turbidez não representam 24 replicações independentes.
 - A chuva pode remover PM do ar e mobilizar sedimentos para a água. Essa é uma explicação plausível para o sinal inverso, não um mecanismo comprovado neste conjunto.
 - O RF estima turbidez do mesmo dia. Treino 02/01–09/03/2026; teste 10/03–07/04/2026. MAE 28,49 NTU, pior que a referência de 24,52 NTU; não é validado para recomendação ambiental.
-- As 350 árvores são uma escolha fixa do ensaio, sem busca de hiperparâmetros. Não há evidência de que esse número seja ótimo.
+- A sensibilidade de árvores usa três dobras cronológicas de dez datas dentro do treino externo; as 29 datas do teste final não participam da comparação. A mediana é ajustada separadamente no treino de cada dobra.
+- Entre os Random Forests comparados, 350 teve a menor MAE média de validação (56,14 NTU), contra 56,31 NTU para 200 árvores. A diferença é pequena diante da variação entre dobras; a referência pela média do treino teve MAE médio menor (53,17 NTU). Portanto, a comparação não demonstra que o RF nem 350 árvores sejam superiores ou ótimos.
+- As 96 correlações são descritivas. Seu número decorre de 3 estações × 2 partículas × 4 indicadores hídricos × 4 defasagens; não é um hiperparâmetro nem um limiar em que o algoritmo começa a errar. Não há valores-p, intervalos de confiança, teste de hipótese ou controle de descobertas falsas. Não selecionar picos como achados confirmados.
 
 ## Fontes
 

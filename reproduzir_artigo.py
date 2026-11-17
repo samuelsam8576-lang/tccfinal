@@ -114,12 +114,14 @@ def main():
             cobertura.append({"estacao": codigo, "indicador": indicador,
                               "dias_elegiveis": int(agua.loc[agua.estacao == codigo, indicador].notna().sum())})
     correlacoes, pares = correlacoes_descritivas(base)
-    metricas, previsoes, imputacao = avaliar_turbidez(base)
+    metricas, previsoes, imputacao, sensibilidade_arvores, sensibilidade_detalhe = avaliar_turbidez(base)
     for nome, tabela in {"agua_diaria.csv": agua, "ar_diario.csv": ar, "clima_diario.csv": clima,
                          "base_diaria_integrada.csv": base, "estatisticas_simqua.csv": pd.DataFrame(estatisticas),
                          "cobertura_diaria.csv": pd.DataFrame(cobertura), "correlacoes_spearman.csv": correlacoes,
                          "pareamentos_spearman_datas.csv": pares, "metricas_modelo_turbidez.csv": metricas,
-                         "previsoes_teste_turbidez.csv": previsoes, "imputacao_treino.csv": imputacao}.items():
+                         "previsoes_teste_turbidez.csv": previsoes, "imputacao_treino.csv": imputacao,
+                         "sensibilidade_arvores.csv": sensibilidade_arvores,
+                         "sensibilidade_arvores_dobras.csv": sensibilidade_detalhe}.items():
         salvar_csv(tabela, saida / nome)
     gravar_json(saida / "ambiente.json", {"python": platform.python_version(), "pandas": pd.__version__,
                                          "numpy": np.__version__, "scipy": scipy.__version__, "scikit_learn": sklearn.__version__,

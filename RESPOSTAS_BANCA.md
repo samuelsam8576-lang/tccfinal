@@ -22,6 +22,16 @@ O desenho atual é descritivo e não testa formalmente hipóteses. Foram apresen
 
 Uma análise confirmatória futura precisaria definir previamente a família de 96 comparações e as hipóteses; modelar chuva, vazão e sazonalidade; usar inferência que preserve a dependência temporal; e corrigir a multiplicidade, por exemplo por controle da taxa de falsas descobertas adequado à dependência. Acrescentar valores-p assintóticos e aplicar uma correção mecânica não resolveria, sozinho, a autocorrelação e a confusão meteorológica. A revisão explicita essa limitação; não afirma que realizou esses testes.
 
+## O que a comparação de 96 coeficientes significa
+
+O total é 3 estações × 2 variáveis de partículas × 4 parâmetros hídricos × 4 defasagens. Portanto, 96 não foi escolhido como parâmetro do algoritmo, nem é um número a partir do qual ele começa a errar. A multiplicidade aumenta o risco de padrões aparentes quando se destacam picos isolados; a análise segue descritiva.
+
+## Por que testar 50, 100, 200, 350 e 500 árvores
+
+A revisão acrescenta validação temporal de três dobras, com dez datas de validação em cada dobra dentro do conjunto de treino externo. Cada data fica inteira na dobra, e as medianas são calculadas apenas no treino de cada dobra. O teste final de 10/03 a 07/04/2026 continua separado.
+
+Entre os cinco Random Forests, 350 árvores apresentou a menor MAE média (56,14 NTU); 200 árvores ficou próximo (56,31 NTU). A diferença é pequena diante dos desvios entre dobras. A referência pela média do treino obteve MAE médio de 53,17 NTU, melhor que todas as configurações avaliadas. Assim, o resultado documenta a comparação, mas não prova que 350 seja ótimo ou que o modelo seja útil para previsão.
+
 ## Por que mais PM pode coincidir com água menos turva
 
 A explicação meteorológica mais plausível é a atuação conjunta da chuva e do escoamento. A precipitação pode remover partículas suspensas da atmosfera e, simultaneamente, transportar sedimentos do solo e de superfícies urbanas para o rio. Assim, dias mais chuvosos podem apresentar menos PM e maior turbidez. Em intervalos menos chuvosos pode haver menos remoção atmosférica e menor aporte de sedimentos, contribuindo para a associação inversa.
@@ -67,5 +77,6 @@ O R² negativo compara o erro quadrático com a média do próprio teste. Essa m
 | 350 árvores | Escolha fixa do ensaio, sem alegação de ser o valor ótimo |
 | Valores ausentes | Spearman sem imputação; no RF, medianas aprendidas apenas no treino |
 | Aprovação | As correções respondem tecnicamente aos pontos apresentados; a avaliação final pertence à banca |
+| Árvores do Random Forest | 350 teve a menor MAE média entre as cinco configurações testadas, mas a referência simples foi melhor; não há alegação de ótimo |
 
 As capturas históricas restantes documentam a interface anterior. Os resultados científicos provêm das tabelas e saídas reproduzíveis, não da leitura de uma captura de tela.

@@ -8,7 +8,8 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
-from ecoradar_metodo import agregar_agua_diaria, integrar, correlacoes_descritivas, ler_csv_estudo
+from ecoradar_metodo import (agregar_agua_diaria, integrar, correlacoes_descritivas,
+                             ler_csv_estudo, comparar_arvores_turbidez)
 from ecoradar_interface import carregar_execucao
 from reproduzir_artigo import carregar
 
@@ -91,6 +92,22 @@ class ProtocoloTest(unittest.TestCase):
         self.assertAlmostEqual(rf.mae, 28.49, places=2)
         self.assertAlmostEqual(rf.r2, -0.891, places=3)
         self.assertGreater(rf.mae, metricas.loc[metricas.modelo == "Média do treino", "mae"].iloc[0])
+
+    def test_sensibilidade_arvores_usa_dobras_cronologicas(self):
+        linhas = []
+        for dia, data in enumerate(pd.date_range("2026-01-01", periods=50, freq="D")):
+            for municipio in ("A", "B"):
+                x = float(dia + (municipio == "B"))
+                linhas.append({"data": data, "municipio": municipio, "turbidez": 10 + .4*x + dia % 7,
+                               "x1": x, "x2": x % 5})
+        resumo, detalhe = comparar_arvores_turbidez(pd.DataFrame(linhas), ["x1", "x2"])
+        rf = resumo[resumo.modelo == "Random Forest"]
+        self.assertEqual(rf.arvores.tolist(), [50, 100, 200, 350, 500])
+        self.assertEqual(len(detalhe), 18)  # 5 modelos + referência em cada uma das 3 dobras
+        for _, grupo in detalhe.groupby("dobra"):
+            self.assertEqual(grupo.datas_validacao.nunique(), 1)
+            self.assertEqual(grupo.datas_validacao.iloc[0], 10)
+            self.assertLess(grupo.fim_treino.max(), grupo.inicio_validacao.min())
 
 
 if __name__ == "__main__":

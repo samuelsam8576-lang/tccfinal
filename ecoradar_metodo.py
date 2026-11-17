@@ -174,6 +174,79 @@ def correlacoes_descritivas(base: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
     return pd.DataFrame(linhas), pd.concat(pareamentos, ignore_index=True) if pareamentos else pd.DataFrame()
 
 
+def comparar_arvores_turbidez(treino: pd.DataFrame, features: list[str],
+                             valores_arvores=(50, 100, 200, 350, 500),
+                             n_splits=3, test_size=10):
+    """Compara árvores por validação temporal dentro do conjunto de treino.
+
+    Todas as linhas de uma data ficam na mesma dobra. A imputação é ajustada
+    em cada treino da dobra; o teste cronológico final não participa da escolha.
+    Também calcula uma referência pela média do treino em cada dobra.
+    """
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+    from sklearn.model_selection import TimeSeriesSplit
+
+    if treino.empty or "data" not in treino or "turbidez" not in treino:
+        raise ValueError("A validação temporal exige treino com data e turbidez")
+    valores_arvores = tuple(int(n) for n in valores_arvores)
+    if not valores_arvores or any(n < 1 for n in valores_arvores):
+        raise ValueError("Os números de árvores devem ser inteiros positivos")
+    datas = np.sort(pd.to_datetime(treino["data"].dropna().unique()))
+    if len(datas) < (n_splits + 1) * test_size:
+        raise ValueError("Datas insuficientes para as dobras temporais solicitadas")
+
+    cv = TimeSeriesSplit(n_splits=n_splits, test_size=test_size)
+    linhas = []
+    for dobra, (idx_tr, idx_val) in enumerate(cv.split(datas), start=1):
+        datas_tr, datas_val = datas[idx_tr], datas[idx_val]
+        tr = treino[treino["data"].isin(datas_tr)].copy()
+        val = treino[treino["data"].isin(datas_val)].copy()
+        medianas = tr[features].median()
+        if medianas.isna().any():
+            raise ValueError("Atributo sem valores de treino na validação temporal")
+
+        referencia = np.full(len(val), tr["turbidez"].mean())
+        linhas.append({
+            "modelo": "Média do treino", "arvores": np.nan, "dobra": dobra,
+            "n_treino": len(tr), "n_validacao": len(val),
+            "datas_treino": tr["data"].nunique(), "datas_validacao": val["data"].nunique(),
+            "fim_treino": str(tr["data"].max().date()),
+            "inicio_validacao": str(val["data"].min().date()),
+            "fim_validacao": str(val["data"].max().date()),
+            "MAE": mean_absolute_error(val["turbidez"], referencia),
+            "RMSE": float(np.sqrt(mean_squared_error(val["turbidez"], referencia))),
+            "R2": r2_score(val["turbidez"], referencia),
+        })
+        for n_arvores in valores_arvores:
+            modelo = RandomForestRegressor(n_estimators=n_arvores, min_samples_leaf=2,
+                                           random_state=42, n_jobs=1)
+            modelo.fit(tr[features].fillna(medianas), tr["turbidez"])
+            previsto = modelo.predict(val[features].fillna(medianas))
+            linhas.append({
+                "modelo": "Random Forest", "arvores": n_arvores, "dobra": dobra,
+                "n_treino": len(tr), "n_validacao": len(val),
+                "datas_treino": tr["data"].nunique(), "datas_validacao": val["data"].nunique(),
+                "fim_treino": str(tr["data"].max().date()),
+                "inicio_validacao": str(val["data"].min().date()),
+                "fim_validacao": str(val["data"].max().date()),
+                "MAE": mean_absolute_error(val["turbidez"], previsto),
+                "RMSE": float(np.sqrt(mean_squared_error(val["turbidez"], previsto))),
+                "R2": r2_score(val["turbidez"], previsto),
+            })
+
+    detalhe = pd.DataFrame(linhas)
+    resumo = detalhe.groupby(["modelo", "arvores"], dropna=False, as_index=False).agg(
+        MAE_medio=("MAE", "mean"), MAE_dp=("MAE", "std"),
+        RMSE_medio=("RMSE", "mean"), RMSE_dp=("RMSE", "std"),
+        R2_medio=("R2", "mean"), R2_dp=("R2", "std"),
+        dobras=("dobra", "count"),
+    )
+    resumo["ordem"] = resumo["arvores"].fillna(0)
+    resumo = resumo.sort_values("ordem").drop(columns="ordem").reset_index(drop=True)
+    return resumo, detalhe
+
+
 def avaliar_turbidez(base: pd.DataFrame):
     from sklearn.ensemble import RandomForestRegressor
     from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -185,6 +258,7 @@ def avaliar_turbidez(base: pd.DataFrame):
     corte = pd.Timestamp(datas[int(len(datas) * .7)])
     tr = dados[dados.data < corte].copy()
     te = dados[dados.data >= corte].copy()
+    sensibilidade_resumo, sensibilidade_detalhe = comparar_arvores_turbidez(tr, features)
     medianas = tr[features].median()
     if medianas.isna().any():
         raise ValueError("Atributo sem valores de treino; não é possível imputar")
@@ -202,4 +276,6 @@ def avaliar_turbidez(base: pd.DataFrame):
                          "inicio_treino": str(tr.data.min().date()), "fim_treino": str(tr.data.max().date()),
                          "inicio_teste": str(te.data.min().date()), "fim_teste": str(te.data.max().date()),
                          "referencia_ntu": tr.turbidez.mean(), "alvo": "turbidez contemporânea; sem horizonte futuro"})
-    return pd.DataFrame(metricas), te, pd.DataFrame({"atributo": features, "mediana_treino": medianas.values})
+    return (pd.DataFrame(metricas), te,
+            pd.DataFrame({"atributo": features, "mediana_treino": medianas.values}),
+            sensibilidade_resumo, sensibilidade_detalhe)

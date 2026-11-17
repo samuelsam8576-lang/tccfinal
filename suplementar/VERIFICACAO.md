@@ -12,9 +12,12 @@ Data: 17/11/2026. As verificações abaixo foram executadas no ambiente registra
 | Pareamentos de calendário | 5.568 pares exportados; datas hídricas correspondem a t + lag exato |
 | Avaliação do RF | 132 observações de treino e 48 de teste; MAE 28,49, RMSE 36,02, R² −0,891 |
 | Referência pela média do treino | MAE 24,52, RMSE 28,85, R² −0,213 |
-| Testes automatizados | 11 testes concluídos, cobrindo cobertura, duplicatas, conflitos, datas, junção, integridade e navegação |
-| Interface arquivada | Carregamento e troca entre EF24, EF25, EF26, pH e PM₁₀ sem chamada de API e sem exceção |
+| Sensibilidade de árvores | 5 configurações em 3 dobras cronológicas dentro do treino; 350 teve MAE média 56,14 NTU, mas a referência por média alcançou 53,17 NTU |
+| Testes automatizados | Não executados nesta conferência: a importação dos módulos parou por ausência de `plotly` e `streamlit`; não houve asserções. Existem 12 casos nos arquivos de teste. |
+| Interface arquivada | Não revalidada por `AppTest` nesta conferência, pois `streamlit` não está instalado. |
 
-Os testes são executados com `python -m unittest test_metodo test_interface -v`. A verificação da interface usa Streamlit AppTest; não equivale a um ensaio de usabilidade com gestores. A disponibilidade permanente dos serviços externos e o comportamento em produção não foram certificados.
+Para executar a suíte, instale `requirements.txt` e rode `python -m unittest test_metodo test_interface -v`. Nesta conferência, o comando terminou antes da execução dos casos: `test_metodo` falhou ao importar `plotly` e `test_interface` falhou ao importar `streamlit`. Portanto, não se afirma aprovação dos testes automatizados nem da interface. A verificação da interface com Streamlit AppTest também não equivale a um ensaio de usabilidade com gestores. A disponibilidade permanente dos serviços externos e o comportamento em produção não foram certificados.
 
 As consultas desta revisão reproduziram, ao arredondamento apresentado no artigo, os resultados numéricos centrais. Os JSON são os obtidos nesta revisão, e não respostas recuperadas das consultas antigas. As medições hídricas preservadas são as que os autores forneceram no ZIP.
+
+A comparação entre números de árvores é uma análise de sensibilidade, não evidência de ótimo global. As dobras são temporais e restritas ao treino externo; o conjunto final de teste não é utilizado para escolher o número de árvores. O Random Forest continuou abaixo da referência simples na MAE média das dobras.
